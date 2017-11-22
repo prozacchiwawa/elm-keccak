@@ -106,13 +106,10 @@ bitsPerElement = 32
 bytesPerElement = bitsPerElement // 8
 elementsPerLane = 64 // bitsPerElement
 elementMask = 0xffffffff
-              
-aslice b s a =
-    if b == s then
-        Array.empty
-    else
-        Array.slice b s a
-
+twentyFive = List.range 0 25
+type alias Elt = (Array Int)
+type alias St = (Array Int)
+    
 --typedef unsigned char UINT8;
 --typedef unsigned long long int UINT64;
 --typedef UINT64 tKeccakLane;
@@ -122,7 +119,7 @@ aslice b s a =
   * On a LE platform, this could be greatly simplified using a cast.
   -}
 --static UINT64 load64(const UINT8 *x)
-load64 : Int -> Array Int -> Array Int
+load64 : Int -> Elt -> Elt
 load64 off arr =
 --{
     --int i;
@@ -134,14 +131,14 @@ load64 off arr =
   * On a LE platform, this could be greatly simplified using a cast.
   -}
 --static void store64(UINT8 *x, UINT64 u)
-store64 : Int -> Array Int -> Array Int -> Array Int
+store64 : Int -> Elt -> Elt -> Elt
 store64 off v arr =
     Array.foldr
         (\(i,v) a -> Array.set (i+off) v a)
         arr
         (Array.indexedMap (\i e -> (i,e)) v)
 
-storexor64 : Int -> Array Int -> Array Int -> Array Int
+storexor64 : Int -> Elt -> Elt -> Elt
 storexor64 off v arr =
     Array.foldr
         (\(i,v) a -> (ArrayX.update (i+off) (Bitwise.xor v) a))
@@ -152,7 +149,7 @@ storexor64 off v arr =
   * On a LE platform, this could be greatly simplified using a cast.
   -}
 --static void xor64(UINT8 *x, UINT64 u)
-xor64 : Array Int -> Array Int -> Array Int
+xor64 : Elt -> Elt -> Elt
 xor64 v arr =
     ArrayX.map2 Bitwise.xor v arr
 --#endif
@@ -169,11 +166,11 @@ A readable and compact implementation of the Keccak-f[1600] permutation.
 i : Int -> Int -> Int
 i x y = (5*y) + x
 
-rolbytes : Int -> Array Int -> Array Int
+rolbytes : Int -> Elt -> Elt
 rolbytes n v =
     Array.append (Array.slice ((elementsPerLane-n)%elementsPerLane) (Array.length v) v) (Array.slice 0 ((elementsPerLane-n)%elementsPerLane) v)
 
-rolbits : Int -> Array Int -> Array Int
+rolbits : Int -> Elt -> Elt
 rolbits n v =
     if n == 0 then
         v
@@ -183,18 +180,18 @@ rolbits n v =
             (\a b -> Bitwise.and elementMask (Bitwise.or (Bitwise.shiftLeftBy n a) (Bitwise.shiftRightZfBy (bitsPerElement-n) b)))
             v oneRotated
 
-rol64 : Int -> Array Int -> Array Int
+rol64 : Int -> Elt -> Elt
 rol64 n v =
     let rby = (n // bitsPerElement) % bitsPerElement in
     let rbi = n % bitsPerElement in
     let rotated = rolbytes rby v in
     rolbits rbi rotated
 
-and64 : Array Int -> Array Int -> Array Int
+and64 : Elt -> Elt -> Elt
 and64 a b =
     ArrayX.map2 Bitwise.and a b
 
-inv64 : Array Int -> Array Int
+inv64 : Elt -> Elt
 inv64 a =
     Array.map (Bitwise.complement >> Bitwise.and elementMask) a
 
@@ -208,17 +205,17 @@ inv64 a =
 --    #define XORLane(x, y, lane)     xor64((UINT8*)state+sizeof(tKeccakLane)*i(x, y), lane)
 --#endif
 
-readLane : Int -> Int -> Array Int -> Array Int
+readLane : Int -> Int -> Elt -> Elt
 readLane x y state =
     let off = elementsPerLane * (i x y) in
     load64 off state
 
-writeLane : Int -> Int -> Array Int -> Array Int -> Array Int
+writeLane : Int -> Int -> Elt -> Elt -> Elt
 writeLane x y lane state =
     let off = elementsPerLane * (i x y) in
     store64 off lane state
 
-xorLane : Int -> Int -> Array Int -> Array Int -> Array Int
+xorLane : Int -> Int -> Elt -> Elt -> Elt
 xorLane x y lane state =
     let off = elementsPerLane * (i x y) in
     storexor64 off lane state
@@ -242,14 +239,14 @@ lfsr86540 lfsr =
 type alias KeccakRound =
     { x : Int
     , y : Int
-    , state : Array Int
-    , current : Array Int
+    , state : St
+    , current : St
     , lfsrstate : Int
     }
 
-zero : Array Int
+zero : Elt
 zero = Array.initialize elementsPerLane (always 0)
-one : Array Int
+one : Elt
 one = Array.initialize elementsPerLane (\n -> if n == 0 then 1 else 0)
 
 five : List Int
@@ -272,26 +269,22 @@ theta ss =
     let d =
         List.map
             (\x ->
-                 let
-                     dx : Array Int
-                     dx =
-                         case (Array.get ((x+4)%5) c, Array.get ((x+1)%5) c) of
-                             (Just c4, Just c1) -> xor64 c4 (rol64 1 c1)
-                             _ -> Debug.crash "wrong indices"
-                 in
-                 dx
+                 case (Array.get ((x+4)%5) c, Array.get ((x+1)%5) c) of
+                     (Just c4, Just c1) -> xor64 c4 (rol64 1 c1)
+                     _ -> Debug.crash "wrong indices"
             )
             five
+        |> Array.fromList
     in
-    List.foldr
-        (\(x,d) ss ->
-            List.foldr
-                (\y ss -> { ss | state = xorLane x y d ss.state })
-                ss
-                five
+    List.foldl
+        (\n ss ->
+             let x = n % 5 in
+             let y = n // 5 in
+             let dx = Array.get x d |> Maybe.withDefault zero in
+             { ss | state = xorLane x y dx ss.state }
         )
         ss
-        (List.indexedMap (\i d -> (i,d)) d)
+        twentyFive
 
 rhoPi : KeccakRound -> KeccakRound
 rhoPi ss =
@@ -351,7 +344,7 @@ iota ss =
         ss
         (List.range 0 6)
 
-initRound : Array Int -> KeccakRound
+initRound : Elt -> KeccakRound
 initRound state =
     { x = 1
     , y = 0
@@ -364,7 +357,7 @@ initRound state =
  * Function that computes the Keccak-f[1600] permutation on the given state.
  -}
 --void KeccakF1600_StatePermute(void *state)
-keccakF1600_StatePermute : Array Int -> Array Int
+keccakF1600_StatePermute : St -> St
 keccakF1600_StatePermute state =
 --{
     --unsigned int round, x, y, j, t;
@@ -407,20 +400,20 @@ that use the Keccak-f[1600] permutation.
 -- #include <string.h>
 -- #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-xorByteIntoState : Int -> Int -> Array Int -> Array Int
+xorByteIntoState : Int -> Int -> St -> St
 xorByteIntoState i v state =
     let e = i//bytesPerElement in
     let shift = 8*(i%bytesPerElement) in
     ArrayX.update e (Bitwise.xor (Bitwise.shiftLeftBy shift v)) state
         
-xorIntoState : List Int -> Array Int -> Array Int
+xorIntoState : List Int -> St -> St
 xorIntoState block state =
     List.foldl
         (\(i,e) s -> xorByteIntoState i e s)
         state
         (List.indexedMap (\i e -> (i,e)) block)
 
-retrieveOutputByte : Int -> Array Int -> Int
+retrieveOutputByte : Int -> St -> Int
 retrieveOutputByte i arr =
     let e = i//bytesPerElement in
     let shift = 8*(i%bytesPerElement) in
