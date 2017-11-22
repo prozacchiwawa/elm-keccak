@@ -1,12 +1,10 @@
-module Keccak exposing (..)
-{-
+module Keccak exposing
     ( fips202_sha3_224
     , fips202_sha3_256
     , fips202_sha3_384
     , fips202_sha3_512
     , ethereum_keccak_256
     )
--}
 {-|
 
 Implementation by the Keccak, Keyak and Ketje Teams, namely, Guido Bertoni,
