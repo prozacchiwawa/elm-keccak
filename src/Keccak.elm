@@ -4,6 +4,7 @@ module Keccak exposing
     , fips202_sha3_384
     , fips202_sha3_512
     , ethereum_keccak_256
+    , rol64
     )
 
 {-|
@@ -107,8 +108,11 @@ bytesPerElement = bitsPerElement // 8
 elementsPerLane = 64 // bitsPerElement
 elementMask = 0xffffffff
 twentyFive = List.range 0 25
-type alias Elt = (Array Int)
+type alias Elt = (Int, Int)
 type alias St = (Array Int)
+
+tupleMap f (a,b) = (f a,f b)
+tupleMap2 f (a1,b1) (a2,b2) = (f a1 a2, f b1 b2)
     
 --typedef unsigned char UINT8;
 --typedef unsigned long long int UINT64;
@@ -119,31 +123,29 @@ type alias St = (Array Int)
   * On a LE platform, this could be greatly simplified using a cast.
   -}
 --static UINT64 load64(const UINT8 *x)
-load64 : Int -> Elt -> Elt
+load64 : Int -> St -> Elt
 load64 off arr =
 --{
     --int i;
     --UINT64 u=0;
-    Array.slice off (off + elementsPerLane) arr
+    case (Array.get off arr, Array.get (off+1) arr) of
+        (Just a, Just b) -> (a,b)
+        _ -> Debug.crash "Wrong offset"
 --}
 
 {-* Function to store a 64-bit value using the little-endian (LE) convention.
   * On a LE platform, this could be greatly simplified using a cast.
   -}
 --static void store64(UINT8 *x, UINT64 u)
-store64 : Int -> Elt -> Elt -> Elt
-store64 off v arr =
-    Array.foldr
-        (\(i,v) a -> Array.set (i+off) v a)
-        arr
-        (Array.indexedMap (\i e -> (i,e)) v)
+store64 : Int -> Elt -> St -> St
+store64 off (va,vb) arr =
+    Array.set off va
+        (Array.set (off+1) vb arr)
 
-storexor64 : Int -> Elt -> Elt -> Elt
-storexor64 off v arr =
-    Array.foldr
-        (\(i,v) a -> (ArrayX.update (i+off) (Bitwise.xor v) a))
-        arr
-        (Array.indexedMap (\i e -> (i,e)) v)
+storexor64 : Int -> Elt -> St -> St
+storexor64 off (va,vb) arr =
+    ArrayX.update off (Bitwise.xor va)
+        (ArrayX.update (off+1) (Bitwise.xor vb) arr)
 
 {-* Function to XOR into a 64-bit value using the little-endian (LE) convention.
   * On a LE platform, this could be greatly simplified using a cast.
@@ -151,7 +153,7 @@ storexor64 off v arr =
 --static void xor64(UINT8 *x, UINT64 u)
 xor64 : Elt -> Elt -> Elt
 xor64 v arr =
-    ArrayX.map2 Bitwise.xor v arr
+    tupleMap2 Bitwise.xor v arr
 --#endif
 
 {-
@@ -167,8 +169,7 @@ i : Int -> Int -> Int
 i x y = (5*y) + x
 
 rolbytes : Int -> Elt -> Elt
-rolbytes n v =
-    Array.append (Array.slice ((elementsPerLane-n)%elementsPerLane) (Array.length v) v) (Array.slice 0 ((elementsPerLane-n)%elementsPerLane) v)
+rolbytes n (va,vb) = if n == 0 then (va,vb) else (vb,va)
 
 rolbits : Int -> Elt -> Elt
 rolbits n v =
@@ -176,7 +177,7 @@ rolbits n v =
         v
     else
         let oneRotated = rolbytes 1 v in
-        ArrayX.map2
+        tupleMap2
             (\a b -> Bitwise.and elementMask (Bitwise.or (Bitwise.shiftLeftBy n a) (Bitwise.shiftRightZfBy (bitsPerElement-n) b)))
             v oneRotated
 
@@ -189,11 +190,11 @@ rol64 n v =
 
 and64 : Elt -> Elt -> Elt
 and64 a b =
-    ArrayX.map2 Bitwise.and a b
+    tupleMap2 Bitwise.and a b
 
 inv64 : Elt -> Elt
 inv64 a =
-    Array.map (Bitwise.complement >> Bitwise.and elementMask) a
+    tupleMap (Bitwise.complement >> Bitwise.and elementMask) a
 
 --#ifdef LITTLE_ENDIAN
 --    #define readLane(x, y)          (((tKeccakLane*)state)[i(x, y)])
@@ -205,17 +206,17 @@ inv64 a =
 --    #define XORLane(x, y, lane)     xor64((UINT8*)state+sizeof(tKeccakLane)*i(x, y), lane)
 --#endif
 
-readLane : Int -> Int -> Elt -> Elt
+readLane : Int -> Int -> St -> Elt
 readLane x y state =
     let off = elementsPerLane * (i x y) in
     load64 off state
 
-writeLane : Int -> Int -> Elt -> Elt -> Elt
+writeLane : Int -> Int -> Elt -> St -> St
 writeLane x y lane state =
     let off = elementsPerLane * (i x y) in
     store64 off lane state
 
-xorLane : Int -> Int -> Elt -> Elt -> Elt
+xorLane : Int -> Int -> Elt -> St -> St
 xorLane x y lane state =
     let off = elementsPerLane * (i x y) in
     storexor64 off lane state
@@ -240,14 +241,14 @@ type alias KeccakRound =
     { x : Int
     , y : Int
     , state : St
-    , current : St
+    , current : Elt
     , lfsrstate : Int
     }
 
 zero : Elt
-zero = Array.initialize elementsPerLane (always 0)
+zero = (0,0)
 one : Elt
-one = Array.initialize elementsPerLane (\n -> if n == 0 then 1 else 0)
+one = (1,0)
 
 five : List Int
 five = List.range 0 4
@@ -344,7 +345,7 @@ iota ss =
         ss
         (List.range 0 6)
 
-initRound : Elt -> KeccakRound
+initRound : St -> KeccakRound
 initRound state =
     { x = 1
     , y = 0
