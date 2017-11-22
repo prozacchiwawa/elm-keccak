@@ -105,7 +105,7 @@ load64 off arr =
 --{
     --int i;
     --UINT64 u=0;
-    aslice off (off + 8) arr
+    Array.slice off (off + 4) arr
 --}
 
 {-* Function to store a 64-bit value using the little-endian (LE) convention.
@@ -149,7 +149,7 @@ i x y = (5*y) + x
 
 rolbytes : Int -> Array Int -> Array Int
 rolbytes n v =
-    Array.append (aslice ((8-n)%8) (Array.length v) v) (aslice 0 ((8-n)%8) v)
+    Array.append (Array.slice ((4-n)%4) (Array.length v) v) (Array.slice 0 ((4-n)%4) v)
 
 rolbits : Int -> Array Int -> Array Int
 rolbits n v =
@@ -158,13 +158,13 @@ rolbits n v =
     else
         let oneRotated = rolbytes 1 v in
         ArrayX.map2
-            (\a b -> Bitwise.and 255 (Bitwise.or (Bitwise.shiftLeftBy n a) (Bitwise.shiftRightZfBy (8-n) b)))
+            (\a b -> Bitwise.and 0xffff (Bitwise.or (Bitwise.shiftLeftBy n a) (Bitwise.shiftRightZfBy (16-n) b)))
             v oneRotated
 
 rol64 : Int -> Array Int -> Array Int
 rol64 n v =
-    let rby = (n // 8) % 8 in
-    let rbi = n % 8 in
+    let rby = (n // 16) % 16 in
+    let rbi = n % 16 in
     let rotated = rolbytes rby v in
     rolbits rbi rotated
 
@@ -174,7 +174,7 @@ and64 a b =
 
 inv64 : Array Int -> Array Int
 inv64 a =
-    Array.map (Bitwise.complement >> Bitwise.and 0xff) a
+    Array.map (Bitwise.complement >> Bitwise.and 0xffff) a
 
 --#ifdef LITTLE_ENDIAN
 --    #define readLane(x, y)          (((tKeccakLane*)state)[i(x, y)])
@@ -188,17 +188,17 @@ inv64 a =
 
 readLane : Int -> Int -> Array Int -> Array Int
 readLane x y state =
-    let off = 8 * (i x y) in
+    let off = 4 * (i x y) in
     load64 off state
 
 writeLane : Int -> Int -> Array Int -> Array Int -> Array Int
 writeLane x y lane state =
-    let off = 8 * (i x y) in
+    let off = 4 * (i x y) in
     store64 off lane state
 
 xorLane : Int -> Int -> Array Int -> Array Int -> Array Int
 xorLane x y lane state =
-    let off = 8 * (i x y) in
+    let off = 4 * (i x y) in
     storexor64 off lane state
 
 {-*
@@ -226,9 +226,9 @@ type alias KeccakRound =
     }
 
 zero : Array Int
-zero = Array.initialize 8 (always 0)
+zero = Array.initialize 4 (always 0)
 one : Array Int
-one = Array.initialize 8 (\n -> if n == 0 then 1 else 0)
+one = Array.initialize 4 (\n -> if n == 0 then 1 else 0)
 
 five : List Int
 five = List.range 0 4
@@ -351,7 +351,7 @@ keccakF1600_StatePermute state =
         List.foldr
             (\_ -> theta >> rhoPi >> chi >> iota)
             -- Start at coordinates (1 0) */
-            (initRound state)
+            (initRound (Debug.log "state" state))
             (List.range 0 23)
     in
     res.state
@@ -385,6 +385,30 @@ that use the Keccak-f[1600] permutation.
 -- #include <string.h>
 -- #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
+endian = 0
+
+xorByteIntoState : Int -> Int -> Array Int -> Array Int
+xorByteIntoState i v state =
+    let e = i//2 in
+    let shift = 8*((Bitwise.xor i endian)%2) in
+    ArrayX.update e (Bitwise.xor (Bitwise.shiftLeftBy shift v)) state
+        
+xorIntoState : List Int -> Array Int -> Array Int
+xorIntoState block state =
+    List.foldl
+        (\(i,e) s -> xorByteIntoState i e s)
+        state
+        (List.indexedMap (\i e -> (i,e)) block)
+
+retrieveOutputByte : Int -> Array Int -> Int
+retrieveOutputByte i arr =
+    let e = i//2 in
+    let shift = 8*((Bitwise.xor i endian)%2) in
+    Array.get e arr
+    |> Maybe.withDefault 0
+    |> Bitwise.shiftRightBy shift
+    |> Bitwise.and 0xff
+
 keccak : Int -> Int -> List Int -> Int -> List Int -> Int -> List Int
 keccak rate capacity input delSuffix output outputLen =
 -- (unsigned int rate, unsigned int capacity, const unsigned char *input, unsigned long long int inputByteLen, unsigned char delimitedSuffix, unsigned char *output, unsigned long long int outputByteLen)
@@ -405,24 +429,6 @@ keccak rate capacity input delSuffix output outputLen =
             inputLength % rateInBytes
     in
 
-    let toSizedList size elt block =
-        if List.length block == size then
-            block
-        else
-            List.foldr
-                (\(i,e) arr -> Array.set i e arr)
-                (Array.initialize size (always elt))
-                (List.indexedMap (\i e -> (i,e)) block)
-            |> Array.toList
-    in
-
-    let xorIntoState block state =
-        List.foldl
-            (\(i,v) -> ArrayX.update i (Bitwise.xor v))
-            state
-            (List.indexedMap (\i e -> (i,e)) block)
-    in    
-
     let state =
         ListX.greedyGroupsOf rateInBytes input
         |> List.foldl
@@ -433,7 +439,7 @@ keccak rate capacity input delSuffix output outputLen =
                 else
                     s1
            )
-           (Array.initialize 200 (always 0))
+           (Array.initialize 100 (always 0))
     in
 
     if ((rate + capacity) /= 1600) || (rate % 8) /= 0 then
@@ -441,7 +447,7 @@ keccak rate capacity input delSuffix output outputLen =
     else
         -- === Do the padding and switch to the squeezing phase ===
         -- Absorb the last few bits and add the first bit of padding (which coincides with the delimiter in delimitedSuffix) */
-        let state1 = ArrayX.update blockSize (Bitwise.xor delSuffix) state in
+        let state1 = xorByteIntoState blockSize delSuffix state in
 
         let state2 =
             -- If the first bit of padding is at position rate-1, we need a whole new block for the second bit of padding */
@@ -451,23 +457,28 @@ keccak rate capacity input delSuffix output outputLen =
                 state1
         in
         -- Add the second bit of padding */
-        let state3 = ArrayX.update (rateInBytes - 1) (Bitwise.xor 0x80) state2 in
-
+        let state3 = xorByteIntoState (rateInBytes - 1) 0x80 state2 in
+ 
         -- Switch to the squeezing phase */
         let state4 = keccakF1600_StatePermute state3 in
-
+ 
+                   
         -- === Squeeze out all the output blocks === */
         let processRemainingOutput state output outputByteLen =
             if outputByteLen > 0 then
                 let blockSize = min outputByteLen rateInBytes in
+                let outputBytes =
+                    List.range 0 blockSize
+                    |> List.map (\i -> retrieveOutputByte i state4)
+                in
                 processRemainingOutput
                     (keccakF1600_StatePermute state)
-                    (output ++ (List.map (Bitwise.and 0xff) (List.take blockSize (Array.toList state4))))
+                    (output ++ outputBytes)
                     (outputByteLen - blockSize)
             else
                 output
-        in
-        List.take outputLen (processRemainingOutput state4 output outputLen)
+       in
+       List.take outputLen (processRemainingOutput state4 output outputLen)
 
 {-*
   *  Function to compute SHAKE128 on the input message with any output length.
