@@ -1,12 +1,12 @@
-module Keccak exposing
+module Keccak exposing (..)
+{-
     ( fips202_sha3_224
     , fips202_sha3_256
     , fips202_sha3_384
     , fips202_sha3_512
     , ethereum_keccak_256
-    , rol64
     )
-
+-}
 {-|
 
 Implementation by the Keccak, Keyak and Ketje Teams, namely, Guido Bertoni,
@@ -105,11 +105,10 @@ Technicalities
 
 bitsPerElement = 32
 bytesPerElement = bitsPerElement // 8
-elementsPerLane = 64 // bitsPerElement
 elementMask = 0xffffffff
 twentyFive = List.range 0 25
 type alias Elt = (Int, Int)
-type alias St = (Array Int)
+type alias St = (Array Elt)
 
 tupleMap f (a,b) = (f a,f b)
 tupleMap2 f (a1,b1) (a2,b2) = (f a1 a2, f b1 b2)
@@ -128,8 +127,8 @@ load64 off arr =
 --{
     --int i;
     --UINT64 u=0;
-    case (Array.get off arr, Array.get (off+1) arr) of
-        (Just a, Just b) -> (a,b)
+    case Array.get off arr of
+        Just a -> a
         _ -> Debug.crash "Wrong offset"
 --}
 
@@ -138,14 +137,12 @@ load64 off arr =
   -}
 --static void store64(UINT8 *x, UINT64 u)
 store64 : Int -> Elt -> St -> St
-store64 off (va,vb) arr =
-    Array.set off va
-        (Array.set (off+1) vb arr)
+store64 off v arr =
+    Array.set off v arr
 
 storexor64 : Int -> Elt -> St -> St
-storexor64 off (va,vb) arr =
-    ArrayX.update off (Bitwise.xor va)
-        (ArrayX.update (off+1) (Bitwise.xor vb) arr)
+storexor64 off v arr =
+    ArrayX.update off (xor64 v) arr
 
 {-* Function to XOR into a 64-bit value using the little-endian (LE) convention.
   * On a LE platform, this could be greatly simplified using a cast.
@@ -208,17 +205,17 @@ inv64 a =
 
 readLane : Int -> Int -> St -> Elt
 readLane x y state =
-    let off = elementsPerLane * (i x y) in
+    let off = i x y in
     load64 off state
 
 writeLane : Int -> Int -> Elt -> St -> St
 writeLane x y lane state =
-    let off = elementsPerLane * (i x y) in
+    let off = i x y in
     store64 off lane state
 
 xorLane : Int -> Int -> Elt -> St -> St
 xorLane x y lane state =
-    let off = elementsPerLane * (i x y) in
+    let off = i x y in
     storexor64 off lane state
 
 {-*
@@ -401,11 +398,18 @@ that use the Keccak-f[1600] permutation.
 -- #include <string.h>
 -- #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
+xorFromByte shift sel by =
+    if sel == 0 then
+        (Bitwise.shiftLeftBy shift by, 0)
+    else
+        (0, Bitwise.shiftLeftBy shift by)
+            
 xorByteIntoState : Int -> Int -> St -> St
 xorByteIntoState i v state =
-    let e = i//bytesPerElement in
+    let e = (i//bytesPerElement)%2 in
     let shift = 8*(i%bytesPerElement) in
-    ArrayX.update e (Bitwise.xor (Bitwise.shiftLeftBy shift v)) state
+    let newElt = xorFromByte shift e v in
+    storexor64 (i//8) newElt state
         
 xorIntoState : List Int -> St -> St
 xorIntoState block state =
@@ -416,12 +420,11 @@ xorIntoState block state =
 
 retrieveOutputByte : Int -> St -> Int
 retrieveOutputByte i arr =
-    let e = i//bytesPerElement in
+    let e = (i//bytesPerElement)%2 in
     let shift = 8*(i%bytesPerElement) in
-    Array.get e arr
-    |> Maybe.withDefault 0
-    |> Bitwise.shiftRightBy shift
-    |> Bitwise.and 0xff
+    let (ea,eb) = Array.get (i//8) arr |> Maybe.withDefault (0,0) in
+    let byi = if e == 0 then ea else eb in
+    Bitwise.shiftRightBy shift byi |> Bitwise.and 0xff
 
 keccak : Int -> Int -> List Int -> Int -> List Int -> Int -> List Int
 keccak rate capacity input delSuffix output outputLen =
@@ -453,7 +456,7 @@ keccak rate capacity input delSuffix output outputLen =
                 else
                     s1
            )
-           (Array.initialize (200 // (8 // elementsPerLane)) (always 0))
+           (Array.initialize 25 (always zero))
     in
 
     if ((rate + capacity) /= 1600) || (rate % 8) /= 0 then
