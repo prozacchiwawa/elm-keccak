@@ -102,6 +102,11 @@ Technicalities
 ================================================================
 -}
 
+bitsPerElement = 32
+bytesPerElement = bitsPerElement // 8
+elementsPerLane = 64 // bitsPerElement
+elementMask = 0xffffffff
+              
 aslice b s a =
     if b == s then
         Array.empty
@@ -122,7 +127,7 @@ load64 off arr =
 --{
     --int i;
     --UINT64 u=0;
-    Array.slice off (off + 4) arr
+    Array.slice off (off + elementsPerLane) arr
 --}
 
 {-* Function to store a 64-bit value using the little-endian (LE) convention.
@@ -166,7 +171,7 @@ i x y = (5*y) + x
 
 rolbytes : Int -> Array Int -> Array Int
 rolbytes n v =
-    Array.append (Array.slice ((4-n)%4) (Array.length v) v) (Array.slice 0 ((4-n)%4) v)
+    Array.append (Array.slice ((elementsPerLane-n)%elementsPerLane) (Array.length v) v) (Array.slice 0 ((elementsPerLane-n)%elementsPerLane) v)
 
 rolbits : Int -> Array Int -> Array Int
 rolbits n v =
@@ -175,13 +180,13 @@ rolbits n v =
     else
         let oneRotated = rolbytes 1 v in
         ArrayX.map2
-            (\a b -> Bitwise.and 0xffff (Bitwise.or (Bitwise.shiftLeftBy n a) (Bitwise.shiftRightZfBy (16-n) b)))
+            (\a b -> Bitwise.and elementMask (Bitwise.or (Bitwise.shiftLeftBy n a) (Bitwise.shiftRightZfBy (bitsPerElement-n) b)))
             v oneRotated
 
 rol64 : Int -> Array Int -> Array Int
 rol64 n v =
-    let rby = (n // 16) % 16 in
-    let rbi = n % 16 in
+    let rby = (n // bitsPerElement) % bitsPerElement in
+    let rbi = n % bitsPerElement in
     let rotated = rolbytes rby v in
     rolbits rbi rotated
 
@@ -191,7 +196,7 @@ and64 a b =
 
 inv64 : Array Int -> Array Int
 inv64 a =
-    Array.map (Bitwise.complement >> Bitwise.and 0xffff) a
+    Array.map (Bitwise.complement >> Bitwise.and elementMask) a
 
 --#ifdef LITTLE_ENDIAN
 --    #define readLane(x, y)          (((tKeccakLane*)state)[i(x, y)])
@@ -205,17 +210,17 @@ inv64 a =
 
 readLane : Int -> Int -> Array Int -> Array Int
 readLane x y state =
-    let off = 4 * (i x y) in
+    let off = elementsPerLane * (i x y) in
     load64 off state
 
 writeLane : Int -> Int -> Array Int -> Array Int -> Array Int
 writeLane x y lane state =
-    let off = 4 * (i x y) in
+    let off = elementsPerLane * (i x y) in
     store64 off lane state
 
 xorLane : Int -> Int -> Array Int -> Array Int -> Array Int
 xorLane x y lane state =
-    let off = 4 * (i x y) in
+    let off = elementsPerLane * (i x y) in
     storexor64 off lane state
 
 {-*
@@ -243,9 +248,9 @@ type alias KeccakRound =
     }
 
 zero : Array Int
-zero = Array.initialize 4 (always 0)
+zero = Array.initialize elementsPerLane (always 0)
 one : Array Int
-one = Array.initialize 4 (\n -> if n == 0 then 1 else 0)
+one = Array.initialize elementsPerLane (\n -> if n == 0 then 1 else 0)
 
 five : List Int
 five = List.range 0 4
@@ -368,7 +373,7 @@ keccakF1600_StatePermute state =
         List.foldr
             (\_ -> theta >> rhoPi >> chi >> iota)
             -- Start at coordinates (1 0) */
-            (initRound (Debug.log "state" state))
+            (initRound state)
             (List.range 0 23)
     in
     res.state
@@ -402,12 +407,10 @@ that use the Keccak-f[1600] permutation.
 -- #include <string.h>
 -- #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-endian = 0
-
 xorByteIntoState : Int -> Int -> Array Int -> Array Int
 xorByteIntoState i v state =
-    let e = i//2 in
-    let shift = 8*((Bitwise.xor i endian)%2) in
+    let e = i//bytesPerElement in
+    let shift = 8*(i%bytesPerElement) in
     ArrayX.update e (Bitwise.xor (Bitwise.shiftLeftBy shift v)) state
         
 xorIntoState : List Int -> Array Int -> Array Int
@@ -419,8 +422,8 @@ xorIntoState block state =
 
 retrieveOutputByte : Int -> Array Int -> Int
 retrieveOutputByte i arr =
-    let e = i//2 in
-    let shift = 8*((Bitwise.xor i endian)%2) in
+    let e = i//bytesPerElement in
+    let shift = 8*(i%bytesPerElement) in
     Array.get e arr
     |> Maybe.withDefault 0
     |> Bitwise.shiftRightBy shift
@@ -456,7 +459,7 @@ keccak rate capacity input delSuffix output outputLen =
                 else
                     s1
            )
-           (Array.initialize 100 (always 0))
+           (Array.initialize (200 // (8 // elementsPerLane)) (always 0))
     in
 
     if ((rate + capacity) /= 1600) || (rate % 8) /= 0 then
