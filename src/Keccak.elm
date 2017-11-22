@@ -260,6 +260,14 @@ cInitX x state =
              )
         )
         
+gd n (d0,d1,d2,d3,d4) =
+    case n of
+        0 -> d0
+        1 -> d1
+        2 -> d2
+        3 -> d3
+        _ -> d4
+
 theta : KeccakRound -> KeccakRound
 theta ss =
     let d x =
@@ -268,14 +276,6 @@ theta ss =
         xor64 c4 (rol64 1 c1)
     in
     let dx = (d 0, d 1, d 2, d 3, d 4) in
-    let gd n (d0,d1,d2,d3,d4) =
-        case n of
-            0 -> d0
-            1 -> d1
-            2 -> d2
-            3 -> d3
-            _ -> d4
-    in
     let sd =
         List.foldl
             (\n state ->
@@ -306,32 +306,40 @@ rhoPi ss =
             }
         )
         { ss | x = 1, y = 0, current = readLane 1 0 ss.state }
-        (List.range 0 23)
+        twentyThree
     --}
 
 chi : KeccakRound -> KeccakRound
 chi ss =
-    List.foldr
-        (\y ss ->
-            let temp =
-                List.map (\x -> readLane x y ss.state) five
-                |> Array.fromList
-            in
+    let state =
             List.foldr
-                (\x ss ->
-                    case (Array.get x temp, Array.get ((x+1)%5) temp, Array.get ((x+2)%5) temp) of
-                        (Just t0, Just t1, Just t2) ->
-                            { ss
-                            | state = writeLane x y (xor64 t0 (and64 (inv64 t1) t2)) ss.state
-                            }
-                        _ -> Debug.crash "Failure in chi"
+                (\y state ->
+                     let temp =
+                             (readLane 0 y ss.state,
+                              readLane 1 y ss.state,
+                              readLane 2 y ss.state,
+                              readLane 3 y ss.state,
+                              readLane 4 y ss.state)
+                     in
+                     let yupdate x state =
+                         writeLane x y
+                             (xor64 (gd x temp)
+                              (and64 (inv64 (gd ((x+1)%5) temp))
+                               (gd ((x+2)%5) temp)))
+                             state
+                     in
+                     state
+                     |> yupdate 0
+                     |> yupdate 1
+                     |> yupdate 2
+                     |> yupdate 3
+                     |> yupdate 4
                 )
-                ss
+                ss.state
                 five
-        )
-        ss
-        five
-
+    in
+    { ss | state = state }
+        
 iota : KeccakRound -> KeccakRound
 iota ss =
     List.foldl
