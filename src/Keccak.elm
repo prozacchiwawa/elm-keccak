@@ -107,6 +107,8 @@ bitsPerElement = 32
 bytesPerElement = bitsPerElement // 8
 elementMask = 0xffffffff
 twentyFive = List.range 0 25
+twentyThree = List.range 0 23
+
 type alias Elt = (Int, Int)
 type alias St = (Array Elt)
 
@@ -365,7 +367,7 @@ keccakF1600_StatePermute state =
             (\_ -> theta >> rhoPi >> chi >> iota)
             -- Start at coordinates (1 0) */
             (initRound state)
-            (List.range 0 23)
+            twentyThree
     in
     res.state
     --for(round=0; round<24; round++) {
