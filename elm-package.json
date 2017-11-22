@@ -1,5 +1,5 @@
 {
-    "version": "1.0.0",
+    "version": "1.0.1",
     "summary": "Keccak and SHA3 hashes",
     "repository": "https://github.com/prozacchiwawa/elm-keccak.git",
     "license": "BSD3",
