@@ -1,6 +1,13 @@
-module Keccak exposing (..)
+module Keccak exposing
+    ( fips202_sha3_224
+    , fips202_sha3_256
+    , fips202_sha3_384
+    , fips202_sha3_512
+    , ethereum_keccak_256
+    )
 
-{-
+{-|
+
 Implementation by the Keccak, Keyak and Ketje Teams, namely, Guido Bertoni,
 Joan Daemen, Michaël Peeters, Gilles Van Assche and Ronny Van Keer, hereby
 denoted as "the implementer".
@@ -13,7 +20,17 @@ http://ketje.noekeon.org/
 To the extent possible under law, the implementer has waived all copyright
 and related or neighboring rights to the source code in this file.
 http://creativecommons.org/publicdomain/zero/1.0/
+
+Ported to elm by Art Yerkes.
+
+ethereum_keccak_256 is the hash function used in many places related to the
+ethereum cryptocurrency.  It is different from sha3 in the padding used.
+
+# Functions
+@docs fips202_sha3_224, fips202_sha3_256, fips202_sha3_384, fips202_sha3_512, ethereum_keccak_256
+
 -}
+
 import Array exposing (Array)
 import Array.Extra as ArrayX
 import Bitwise
@@ -504,6 +521,10 @@ keccak rate capacity input delSuffix output outputLen =
 --    Keccak(1152, 448, input, inputByteLen, 0x06, output, 28);
 --}
 
+{-|
+  Compute the sha3 224 of a list of byte width integers (0-255) as a list of
+  byte width integers.
+-}
 fips202_sha3_224 : List Int -> List Int
 fips202_sha3_224 input =
     keccak 1152 448 input 6 [] 28
@@ -515,10 +536,19 @@ fips202_sha3_224 input =
 --{
 --    Keccak(1088, 512, input, inputByteLen, 0x06, output, 32);
 --}
+
+{-|
+  Compute the sha3 256 of a list of byte width integers (0-255) as a list of
+  byte width integers.
+-}
 fips202_sha3_256 : List Int -> List Int
 fips202_sha3_256 input =
     keccak 1088 512 input 6 [] 32
 
+{-|
+  Compute the ethereum style 256-bit hash of a list of byte width integers (0-255)
+  as a list of byte width integers.
+-}
 ethereum_keccak_256 : List Int -> List Int
 ethereum_keccak_256 input =
     keccak 1088 512 input 1 [] 32
@@ -530,6 +560,11 @@ ethereum_keccak_256 input =
 --{
 --    Keccak(832, 768, input, inputByteLen, 0x06, output, 48);
 --}
+
+{-|
+  Compute the sha3 384 of a list of byte width integers (0-255) as a list of
+  byte width integers.
+-}
 fips202_sha3_384 : List Int -> List Int
 fips202_sha3_384 input =
     keccak 832 768 input 6 [] 48
@@ -541,6 +576,11 @@ fips202_sha3_384 input =
 --{
 --    Keccak(576, 1024, input, inputByteLen, 0x06, output, 64);
 --}
+
+{-|
+  Compute the sha3 512 of a list of byte width integers (0-255) as a list of
+  byte width integers.
+-}
 fips202_sha3_512 : List Int -> List Int
 fips202_sha3_512 input =
     keccak 576 1024 input 6 [] 64

@@ -1,12 +1,14 @@
 {
     "version": "1.0.0",
-    "summary": "helpful summary of your project, less than 80 characters",
-    "repository": "https://github.com/user/project.git",
+    "summary": "Keccak and SHA3 hashes",
+    "repository": "https://github.com/prozacchiwawa/elm-keccak.git",
     "license": "BSD3",
     "source-directories": [
         "src"
     ],
-    "exposed-modules": [],
+    "exposed-modules": [
+        "Keccak"
+    ],
     "dependencies": {
         "elm-community/array-extra": "1.0.2 <= v < 2.0.0",
         "elm-community/list-extra": "6.1.0 <= v < 7.0.0",
