@@ -252,39 +252,41 @@ one = (1,0)
 five : List Int
 five = List.range 0 4
 
-cInit state =
-    Array.initialize 5
-        (\x ->
-            xor64 (readLane x 0 state)
-                (xor64 (readLane x 1 state)
-                    (xor64 (readLane x 2 state)
-                        (xor64 (readLane x 3 state) (readLane x 4 state))
-                    )
-                )
+cInitX x state =
+    xor64 (readLane x 0 state)
+        (xor64 (readLane x 1 state)
+             (xor64 (readLane x 2 state)
+                  (xor64 (readLane x 3 state) (readLane x 4 state))
+             )
         )
-
+        
 theta : KeccakRound -> KeccakRound
 theta ss =
-    let c = cInit ss.state in
-    let d =
-        List.map
-            (\x ->
-                 case (Array.get ((x+4)%5) c, Array.get ((x+1)%5) c) of
-                     (Just c4, Just c1) -> xor64 c4 (rol64 1 c1)
-                     _ -> Debug.crash "wrong indices"
-            )
-            five
-        |> Array.fromList
+    let d x =
+        let c4 = cInitX ((x+4)%5) ss.state in
+        let c1 = cInitX ((x+1)%5) ss.state in
+        xor64 c4 (rol64 1 c1)
     in
-    List.foldl
-        (\n ss ->
-             let x = n % 5 in
-             let y = n // 5 in
-             let dx = Array.get x d |> Maybe.withDefault zero in
-             { ss | state = xorLane x y dx ss.state }
-        )
-        ss
-        twentyFive
+    let dx = (d 0, d 1, d 2, d 3, d 4) in
+    let gd n (d0,d1,d2,d3,d4) =
+        case n of
+            0 -> d0
+            1 -> d1
+            2 -> d2
+            3 -> d3
+            _ -> d4
+    in
+    let sd =
+        List.foldl
+            (\n state ->
+                 let x = n % 5 in
+                 let y = n // 5 in
+                 xorLane x y (gd x dx) state
+            )
+            ss.state
+            twentyFive
+    in
+    { ss | state = sd }
 
 rhoPi : KeccakRound -> KeccakRound
 rhoPi ss =
