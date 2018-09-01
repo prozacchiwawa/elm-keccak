@@ -1,12 +1,10 @@
-module Keccak exposing (..)
-{-
+module Keccak exposing
     ( fips202_sha3_224
     , fips202_sha3_256
     , fips202_sha3_384
     , fips202_sha3_512
     , ethereum_keccak_256
     )
--}
 {-|
 
 Implementation by the [Keccak](http://keccak.noekeon.org/), [Keyak](http://keyak.noekeon.org/) and [Ketje](http://ketje.noekeon.org/) Teams, namely, Guido Bertoni,
@@ -131,7 +129,7 @@ load64 off arr =
     --UINT64 u=0;
     case Array.get off arr of
         Just a -> a
-        _ -> Debug.log "Wrong offset" (0,0)
+        _ -> (0,0) -- -- Was `Debug.crash "wrong offset"` in 0.18, but had to remove for 0.19. This is considered an impossible state.
 --}
 
 {-* Function to store a 64-bit value using the little-endian (LE) convention.
@@ -505,7 +503,7 @@ keccak rate capacity input delSuffix output outputLen =
                     (Array.initialize 25 (always zero))
     in
     if ((rate + capacity) /= 1600) || (modBy 8 rate) /= 0 then
-        Debug.log "wrong capacity or rate" []
+        [] -- Was `Debug.crash "wrong capacity or rate"` in 0.18, but had to remove for 0.19. This is considered an impossible state.
     else
         -- === Do the padding and switch to the squeezing phase ===
         -- Absorb the last few bits and add the first bit of padding (which coincides with the delimiter in delimitedSuffix) */
