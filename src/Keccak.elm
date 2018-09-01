@@ -25,6 +25,9 @@ Ported to elm by Art Yerkes.
 ethereum_keccak_256 is the hash function used in many places related to the
 ethereum cryptocurrency.  It is different from sha3 in the padding used.
 
+Elm 0.19 update by Coury Ditch
+https://github.com/cmditch
+
 # Functions
 @docs fips202_sha3_224, fips202_sha3_256, fips202_sha3_384, fips202_sha3_512, ethereum_keccak_256
 
