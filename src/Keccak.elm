@@ -1,22 +1,20 @@
-module Keccak exposing (..)
-{-
+module Keccak exposing
     ( fips202_sha3_224
     , fips202_sha3_256
     , fips202_sha3_384
     , fips202_sha3_512
     , ethereum_keccak_256
     )
--}
 {-|
 
-Implementation by the Keccak, Keyak and Ketje Teams, namely, Guido Bertoni,
+Implementation by the [Keccak](http://keccak.noekeon.org/), [Keyak](http://keyak.noekeon.org/) and [Ketje](http://ketje.noekeon.org/) Teams, namely, Guido Bertoni,
 Joan Daemen, Michaël Peeters, Gilles Van Assche and Ronny Van Keer, hereby
 denoted as "the implementer".
 
 For more information, feedback or questions, please refer to our websites:
-http://keccak.noekeon.org/
-http://keyak.noekeon.org/
-http://ketje.noekeon.org/
+
+
+
 
 To the extent possible under law, the implementer has waived all copyright
 and related or neighboring rights to the source code in this file.
@@ -33,7 +31,6 @@ ethereum cryptocurrency.  It is different from sha3 in the padding used.
 -}
 
 import Array exposing (Array)
-import Array.Extra as ArrayX
 import Bitwise
 import List.Extra as ListX
 
@@ -110,11 +107,12 @@ twentyFive = List.range 0 25
 twentyThree = List.range 0 23
 
 type alias Elt = (Int, Int)
+
 type alias St = (Array Elt)
 
 tupleMap f (a,b) = (f a,f b)
 tupleMap2 f (a1,b1) (a2,b2) = (f a1 a2, f b1 b2)
-    
+
 --typedef unsigned char UINT8;
 --typedef unsigned long long int UINT64;
 --typedef UINT64 tKeccakLane;
@@ -131,7 +129,7 @@ load64 off arr =
     --UINT64 u=0;
     case Array.get off arr of
         Just a -> a
-        _ -> Debug.crash "Wrong offset"
+        _ -> (0,0) -- -- Was `Debug.crash "wrong offset"` in 0.18, but had to remove for 0.19. This is considered an impossible state.
 --}
 
 {-* Function to store a 64-bit value using the little-endian (LE) convention.
@@ -144,7 +142,7 @@ store64 off v arr =
 
 storexor64 : Int -> Elt -> St -> St
 storexor64 off v arr =
-    ArrayX.update off (xor64 v) arr
+    updateArray off (xor64 v) arr
 
 {-* Function to XOR into a 64-bit value using the little-endian (LE) convention.
   * On a LE platform, this could be greatly simplified using a cast.
@@ -155,6 +153,18 @@ xor64 v arr =
     tupleMap2 Bitwise.xor v arr
 --#endif
 
+-- Same as Array.Extra.update
+updateArray : Int -> (a -> a) -> Array a -> Array a
+updateArray n f a =
+    let
+        element =
+            Array.get n a
+    in
+    case element of
+        Nothing ->
+            a
+        Just element_ ->
+            Array.set n (f element_) a
 {-
 ================================================================
 A readable and compact implementation of the Keccak-f[1600] permutation.
@@ -164,11 +174,12 @@ A readable and compact implementation of the Keccak-f[1600] permutation.
 --#define ROL64(a, offset) ((((UINT64)a) << offset) ^ (((UINT64)a) >> (64-offset)))
 --#define i(x, y) ((x)+5*(y))
 
-i : Int -> Int -> Int
-i x y = (5*y) + x
+iPerm : Int -> Int -> Int
+iPerm x y = (5*y) + x
 
 rolbytes : Int -> Elt -> Elt
-rolbytes n (va,vb) = if n == 0 then (va,vb) else (vb,va)
+rolbytes n (va,vb) =
+    if n == 0 then (va,vb) else (vb,va)
 
 rolbits : Int -> Elt -> Elt
 rolbits n v =
@@ -182,9 +193,11 @@ rolbits n v =
 
 rol64 : Int -> Elt -> Elt
 rol64 n v =
-    let rby = (n // bitsPerElement) % bitsPerElement in
-    let rbi = n % bitsPerElement in
-    let rotated = rolbytes rby v in
+    let
+        rby = modBy bitsPerElement (n // bitsPerElement)
+        rbi = modBy bitsPerElement n
+        rotated = rolbytes rby v
+    in
     rolbits rbi rotated
 
 and64 : Elt -> Elt -> Elt
@@ -207,17 +220,17 @@ inv64 a =
 
 readLane : Int -> Int -> St -> Elt
 readLane x y state =
-    let off = i x y in
+    let off = iPerm x y in
     load64 off state
 
 writeLane : Int -> Int -> Elt -> St -> St
 writeLane x y lane state =
-    let off = i x y in
+    let off = iPerm x y in
     store64 off lane state
 
 xorLane : Int -> Int -> Elt -> St -> St
 xorLane x y lane state =
-    let off = i x y in
+    let off = iPerm x y in
     storexor64 off lane state
 
 {-*
@@ -259,8 +272,8 @@ cInitX x state =
                   (xor64 (readLane x 3 state) (readLane x 4 state))
              )
         )
-        
-gd n (d0,d1,d2,d3,d4) =
+
+gd n { d0, d1, d2, d3, d4 } =
     case n of
         0 -> d0
         1 -> d1
@@ -270,21 +283,26 @@ gd n (d0,d1,d2,d3,d4) =
 
 theta : KeccakRound -> KeccakRound
 theta ss =
-    let d x =
-        let c4 = cInitX ((x+4)%5) ss.state in
-        let c1 = cInitX ((x+1)%5) ss.state in
-        xor64 c4 (rol64 1 c1)
-    in
-    let dx = (d 0, d 1, d 2, d 3, d 4) in
-    let sd =
-        List.foldl
-            (\n state ->
-                 let x = n % 5 in
-                 let y = n // 5 in
-                 xorLane x y (gd x dx) state
-            )
-            ss.state
-            twentyFive
+    let
+        d x =
+            let
+                c4 = cInitX (modBy 5 (x+4)) ss.state
+                c1 = cInitX (modBy 5 (x+1)) ss.state
+            in
+            xor64 c4 (rol64 1 c1)
+
+        dx =
+            { d0 = d 0, d1 = d 1, d2 = d 2, d3 = d 3, d4 = d 4}
+
+        sd =
+            List.foldl
+                (\n state ->
+                        let x = modBy 5 n in
+                        let y = n // 5 in
+                        xorLane x y (gd x dx) state
+                )
+                ss.state
+                twentyFive
     in
     { ss | state = sd }
 
@@ -292,17 +310,19 @@ rhoPi : KeccakRound -> KeccakRound
 rhoPi ss =
     -- Iterate over ((0 1)(2 3))^t * (1 0) for 0 ≤ t ≤ 23 */
     List.foldl
-        (\t ss ->
+        (\t ss_ ->
+            let
             -- Compute the rotation constant r = (t+1)(t+2)/2 */
-            let r = (((t+1)*(t+2))//2)%64 in
+                r = modBy 64 (((t+1)*(t+2))//2)
             -- Compute ((0 1)(2 3)) * (x y) */
-            let yy = (2*ss.x+3*ss.y)%5 in
+                yy = modBy 5 (2*ss_.x+3*ss_.y)
+            in
             -- Swap current and state(x,y), and rotate */
-            { ss
-            | x = ss.y
+            { ss_
+            | x = ss_.y
             , y = yy
-            , current = readLane ss.y yy ss.state
-            , state = writeLane ss.y yy (rol64 r ss.current) ss.state
+            , current = readLane ss_.y yy ss_.state
+            , state = writeLane ss_.y yy (rol64 r ss_.current) ss_.state
             }
         )
         { ss | x = 1, y = 0, current = readLane 1 0 ss.state }
@@ -311,45 +331,50 @@ rhoPi ss =
 
 chi : KeccakRound -> KeccakRound
 chi ss =
-    let state =
+    let
+        newState =
             List.foldr
                 (\y state ->
-                     let temp =
-                             (readLane 0 y ss.state,
-                              readLane 1 y ss.state,
-                              readLane 2 y ss.state,
-                              readLane 3 y ss.state,
-                              readLane 4 y ss.state)
-                     in
-                     let yupdate x state =
-                         writeLane x y
-                             (xor64 (gd x temp)
-                              (and64 (inv64 (gd ((x+1)%5) temp))
-                               (gd ((x+2)%5) temp)))
-                             state
+                     let
+                        temp =
+                            { d0 = readLane 0 y ss.state
+                            , d1 = readLane 1 y ss.state
+                            , d2 = readLane 2 y ss.state
+                            , d3 = readLane 3 y ss.state
+                            , d4 = readLane 4 y ss.state
+                            }
+
+                        yupdate x state_ =
+                            writeLane x y
+                                (xor64 (gd x temp)
+                                (and64 (inv64 (gd (modBy 5 (x+1)) temp))
+                                (gd (modBy 5 (x+2)) temp)))
+                                state_
                      in
                      state
-                     |> yupdate 0
-                     |> yupdate 1
-                     |> yupdate 2
-                     |> yupdate 3
-                     |> yupdate 4
+                        |> yupdate 0
+                        |> yupdate 1
+                        |> yupdate 2
+                        |> yupdate 3
+                        |> yupdate 4
                 )
                 ss.state
                 five
     in
-    { ss | state = state }
-        
+    { ss | state = newState }
+
 iota : KeccakRound -> KeccakRound
 iota ss =
     List.foldl
-        (\j ss ->
-            let bitPosition = (Bitwise.shiftLeftBy j 1) - 1 in
-            let (o,lfsr) = lfsr86540 ss.lfsrstate in
+        (\j ss_ ->
+            let
+                bitPosition = (Bitwise.shiftLeftBy j 1) - 1
+                (o,lfsr) = lfsr86540 ss_.lfsrstate
+            in
             if o then
-                { ss | state = xorLane 0 0 (rol64 bitPosition one) ss.state, lfsrstate = lfsr }
+                { ss_ | state = xorLane 0 0 (rol64 bitPosition one) ss_.state, lfsrstate = lfsr }
             else
-                { ss | lfsrstate = lfsr }
+                { ss_ | lfsrstate = lfsr }
         )
         ss
         (List.range 0 6)
@@ -372,12 +397,13 @@ keccakF1600_StatePermute state =
 --{
     --unsigned int round, x, y, j, t;
     --UINT8 LFSRstate = 0x01;
-    let res =
-        List.foldr
-            (\_ -> theta >> rhoPi >> chi >> iota)
-            -- Start at coordinates (1 0) */
-            (initRound state)
-            twentyThree
+    let
+        res =
+            List.foldr
+                (\_ -> theta >> rhoPi >> chi >> iota)
+                -- Start at coordinates (1 0) */
+                (initRound state)
+                twentyThree
     in
     res.state
     --for(round=0; round<24; round++) {
@@ -415,14 +441,16 @@ xorFromByte shift sel by =
         (Bitwise.shiftLeftBy shift by, 0)
     else
         (0, Bitwise.shiftLeftBy shift by)
-            
+
 xorByteIntoState : Int -> Int -> St -> St
 xorByteIntoState i v state =
-    let e = (i//bytesPerElement)%2 in
-    let shift = 8*(i%bytesPerElement) in
-    let newElt = xorFromByte shift e v in
+    let
+        e = modBy 2 (i//bytesPerElement)
+        shift = 8 * (modBy bytesPerElement i)
+        newElt = xorFromByte shift e v
+    in
     storexor64 (i//8) newElt state
-        
+
 xorIntoState : List Int -> St -> St
 xorIntoState block state =
     List.foldl
@@ -432,82 +460,90 @@ xorIntoState block state =
 
 retrieveOutputByte : Int -> St -> Int
 retrieveOutputByte i arr =
-    let e = (i//bytesPerElement)%2 in
-    let shift = 8*(i%bytesPerElement) in
-    let (ea,eb) = Array.get (i//8) arr |> Maybe.withDefault (0,0) in
-    let byi = if e == 0 then ea else eb in
+    let
+        e = modBy 2 (i//bytesPerElement)
+        shift = 8*(modBy bytesPerElement i)
+        (ea,eb) = Array.get (i//8) arr |> Maybe.withDefault (0,0)
+        byi = if e == 0 then ea else eb
+    in
     Bitwise.shiftRightBy shift byi |> Bitwise.and 0xff
 
 keccak : Int -> Int -> List Int -> Int -> List Int -> Int -> List Int
 keccak rate capacity input delSuffix output outputLen =
 -- (unsigned int rate, unsigned int capacity, const unsigned char *input, unsigned long long int inputByteLen, unsigned char delimitedSuffix, unsigned char *output, unsigned long long int outputByteLen)
     --UINT8 state[200];
-    let rateInBytes = rate // 8 in
+    let
+        rateInBytes = rate // 8
     --unsigned int rateInBytes = rate/8;
     --unsigned int blockSize = 0;
     --unsigned int i;
 
-    let inputLength = List.length input in
+        inputLength = List.length input
 
-    let blockSize =
-        if inputLength == 0 then
-            0
-        else if inputLength % rateInBytes == 0 then
-            rateInBytes
-        else
-            inputLength % rateInBytes
+        blockSize =
+            if inputLength == 0 then
+                0
+            else if modBy rateInBytes inputLength == 0 then
+                rateInBytes
+            else
+                modBy rateInBytes inputLength
+
+        state =
+            ListX.greedyGroupsOf rateInBytes input
+                |> List.foldl
+                    (\inb state_ ->
+                        let
+                            s1 = xorIntoState inb state_
+                        in
+                        if (List.length inb) == rateInBytes then
+                            keccakF1600_StatePermute s1
+                        else
+                            s1
+                    )
+                    (Array.initialize 25 (always zero))
     in
-
-    let state =
-        ListX.greedyGroupsOf rateInBytes input
-        |> List.foldl
-           (\inb state ->
-                let s1 = xorIntoState inb state in
-                if (List.length inb) == rateInBytes then
-                    keccakF1600_StatePermute s1
-                else
-                    s1
-           )
-           (Array.initialize 25 (always zero))
-    in
-
-    if ((rate + capacity) /= 1600) || (rate % 8) /= 0 then
-        Debug.crash "wrong capacity or rate"
+    if ((rate + capacity) /= 1600) || (modBy 8 rate) /= 0 then
+        [] -- Was `Debug.crash "wrong capacity or rate"` in 0.18, but had to remove for 0.19. This is considered an impossible state.
     else
         -- === Do the padding and switch to the squeezing phase ===
         -- Absorb the last few bits and add the first bit of padding (which coincides with the delimiter in delimitedSuffix) */
-        let state1 = xorByteIntoState blockSize delSuffix state in
+        let
+            state1 = xorByteIntoState blockSize delSuffix state
 
-        let state2 =
+            state2 =
             -- If the first bit of padding is at position rate-1, we need a whole new block for the second bit of padding */
-            if (((Bitwise.and delSuffix 0x80) /= 0) && (blockSize == (rateInBytes-1))) then
-                keccakF1600_StatePermute state1
-            else
-                state1
-        in
+                if (((Bitwise.and delSuffix 0x80) /= 0) && (blockSize == (rateInBytes-1))) then
+                    keccakF1600_StatePermute state1
+                else
+                    state1
+
         -- Add the second bit of padding */
-        let state3 = xorByteIntoState (rateInBytes - 1) 0x80 state2 in
- 
+            state3 = xorByteIntoState (rateInBytes - 1) 0x80 state2
+
         -- Switch to the squeezing phase */
-        let state4 = keccakF1600_StatePermute state3 in
- 
-                   
+            state4 = keccakF1600_StatePermute state3
+
+
         -- === Squeeze out all the output blocks === */
-        let processRemainingOutput state output outputByteLen =
-            if outputByteLen > 0 then
-                let blockSize = min outputByteLen rateInBytes in
-                let outputBytes =
-                    List.range 0 blockSize
-                    |> List.map (\i -> retrieveOutputByte i state4)
-                in
-                processRemainingOutput
-                    (keccakF1600_StatePermute state)
-                    (output ++ outputBytes)
-                    (outputByteLen - blockSize)
-            else
-                output
+            processRemainingOutput state_ output_ outputByteLen =
+                if outputByteLen > 0 then
+                    let
+                        blockSize_ = min outputByteLen rateInBytes
+                        outputBytes =
+                            List.range 0 blockSize_
+                                |> List.map (\i -> retrieveOutputByte i state4)
+                    in
+                    processRemainingOutput
+                        (keccakF1600_StatePermute state_)
+                        (output_ ++ outputBytes)
+                        (outputByteLen - blockSize_)
+                else
+                    output_
        in
        List.take outputLen (processRemainingOutput state4 output outputLen)
+
+
+
 
 {-*
   *  Function to compute SHAKE128 on the input message with any output length.
@@ -564,7 +600,7 @@ fips202_sha3_256 input =
 ethereum_keccak_256 : List Int -> List Int
 ethereum_keccak_256 input =
     keccak 1088 512 input 1 [] 32
-        
+
 {-*
   *  Function to compute SHA3-384 on the input message. The output length is fixed to 48 bytes.
   -}
@@ -596,3 +632,5 @@ fips202_sha3_384 input =
 fips202_sha3_512 : List Int -> List Int
 fips202_sha3_512 input =
     keccak 576 1024 input 6 [] 64
+
+

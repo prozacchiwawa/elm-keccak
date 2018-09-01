@@ -1,13 +1,11 @@
-module Main exposing (..)
+module Tests exposing (..)
 
-import Expect exposing (Expectation)
-import Fuzz exposing (Fuzzer, list, int, string)
+import Expect
 import Test exposing (..)
 
 import Array
 import Char
 import Hex
-import Html exposing (Html, text, div)
 
 import Keccak
 
@@ -23,8 +21,8 @@ foobar = "foobar"
 testsig = "baz(uint32,bool)"
 sigtext = "f(uint256,uint32[],bytes10,bytes)"
 
-listify sigtext =
-    String.toList sigtext |> List.map Char.toCode
+listify sigtext_ =
+    String.toList sigtext_ |> List.map Char.toCode
 
 -- 0e130d830bbb4754d860735bf6b4bb1b6e711069f59698862b96679edad9c832
 data = """00: 06 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00
