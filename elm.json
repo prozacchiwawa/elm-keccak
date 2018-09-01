@@ -2,8 +2,8 @@
     "type": "package",
     "name": "prozacchiwawa/elm-keccak",
     "summary": "Keccak and SHA3 hashes",
-    "license": "BSD-3-Clause",
-    "version": "1.0.2",
+    "license": "MIT",
+    "version": "1.0.0",
     "exposed-modules": [
         "Keccak"
     ],
