@@ -34,6 +34,7 @@ https://github.com/cmditch
 -}
 
 import Array exposing (Array)
+import Bytes.Decode as BDec
 import Bitwise
 import List.Extra as ListX
 
@@ -471,12 +472,19 @@ retrieveOutputByte i arr =
     in
     Bitwise.shiftRightBy shift byi |> Bitwise.and 0xff
 
-keccak : Int -> Int -> List Int -> Int -> List Int -> Int -> List Int
-keccak rate capacity input delSuffix output outputLen =
+type alias KeccakConfig =
+    { rate : Int
+    , capacity : Int
+    , delSuffix : Int
+    , outputLen : Int
+    }
+        
+keccak : KeccakConfig -> List Int -> List Int -> List Int
+keccak config input output =
 -- (unsigned int rate, unsigned int capacity, const unsigned char *input, unsigned long long int inputByteLen, unsigned char delimitedSuffix, unsigned char *output, unsigned long long int outputByteLen)
     --UINT8 state[200];
     let
-        rateInBytes = rate // 8
+        rateInBytes = config.rate // 8
     --unsigned int rateInBytes = rate/8;
     --unsigned int blockSize = 0;
     --unsigned int i;
@@ -505,17 +513,17 @@ keccak rate capacity input delSuffix output outputLen =
                     )
                     (Array.initialize 25 (always zero))
     in
-    if ((rate + capacity) /= 1600) || (modBy 8 rate) /= 0 then
+    if ((config.rate + config.capacity) /= 1600) || (modBy 8 config.rate) /= 0 then
         [] -- Was `Debug.crash "wrong capacity or rate"` in 0.18, but had to remove for 0.19. This is considered an impossible state.
     else
         -- === Do the padding and switch to the squeezing phase ===
         -- Absorb the last few bits and add the first bit of padding (which coincides with the delimiter in delimitedSuffix) */
         let
-            state1 = xorByteIntoState blockSize delSuffix state
+            state1 = xorByteIntoState blockSize config.delSuffix state
 
             state2 =
             -- If the first bit of padding is at position rate-1, we need a whole new block for the second bit of padding */
-                if (((Bitwise.and delSuffix 0x80) /= 0) && (blockSize == (rateInBytes-1))) then
+                if (((Bitwise.and config.delSuffix 0x80) /= 0) && (blockSize == (rateInBytes-1))) then
                     keccakF1600_StatePermute state1
                 else
                     state1
@@ -543,7 +551,7 @@ keccak rate capacity input delSuffix output outputLen =
                 else
                     output_
        in
-       List.take outputLen (processRemainingOutput state4 output outputLen)
+       List.take config.outputLen (processRemainingOutput state4 output config.outputLen)
 
 
 
@@ -578,7 +586,7 @@ keccak rate capacity input delSuffix output outputLen =
 -}
 fips202_sha3_224 : List Int -> List Int
 fips202_sha3_224 input =
-    keccak 1152 448 input 6 [] 28
+    keccak { rate = 1152, capacity = 448, delSuffix = 6, outputLen = 28 } input []
 
 {-*
   *  Function to compute SHA3-256 on the input message. The output length is fixed to 32 bytes.
@@ -594,7 +602,7 @@ fips202_sha3_224 input =
 -}
 fips202_sha3_256 : List Int -> List Int
 fips202_sha3_256 input =
-    keccak 1088 512 input 6 [] 32
+    keccak { rate = 1088, capacity = 512, delSuffix = 6, outputLen = 32 } input []
 
 {-|
   Compute the ethereum style 256-bit hash of a list of byte width integers (0-255)
@@ -602,7 +610,7 @@ fips202_sha3_256 input =
 -}
 ethereum_keccak_256 : List Int -> List Int
 ethereum_keccak_256 input =
-    keccak 1088 512 input 1 [] 32
+    keccak { rate = 1088, capacity = 512, delSuffix = 1, outputLen = 32 } input []
 
 {-*
   *  Function to compute SHA3-384 on the input message. The output length is fixed to 48 bytes.
@@ -618,7 +626,7 @@ ethereum_keccak_256 input =
 -}
 fips202_sha3_384 : List Int -> List Int
 fips202_sha3_384 input =
-    keccak 832 768 input 6 [] 48
+    keccak { rate = 832, capacity = 768, delSuffix = 6, outputLen = 48 } input []
 
 {-*
   *  Function to compute SHA3-512 on the input message. The output length is fixed to 64 bytes.
@@ -634,6 +642,6 @@ fips202_sha3_384 input =
 -}
 fips202_sha3_512 : List Int -> List Int
 fips202_sha3_512 input =
-    keccak 576 1024 input 6 [] 64
+    keccak { rate = 576, capacity = 1024, delSuffix = 6, outputLen = 64 } input []
 
 
