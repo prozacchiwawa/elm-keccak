@@ -41,11 +41,15 @@ For a replacement for the original version of this library,
     -- Exposes fips_202_sha3_224 etc with int list inputs
     import Keccak.Int as Keccak 
 
-For slightly better versions of the originals using <a href='https://package.elm-lang.org/packages/elm/bytes/latest/Bytes'>elm/bytes</a>,
+For slightly better versions of the originals using [elm/bytes](https://package.elm-lang.org/packages/elm/bytes/latest/Bytes),
 
-    -- Exposes fips202_sha3_224 etc with <a href='https://package.elm-lang.org/packages/elm/bytes/latest/Bytes#Bytes'>bytes</a> inputs
+    -- Exposes fips202_sha3_224 etc with Bytes
     import Keccak.Bytes as Keccak
     import Bytes.Encode as BEnc
+    import String
+    import Hex
+
+    hexify l = String.concat (List.map (Hex.toString >> String.padLeft 2 '0') l)
 
     hexify (Keccak.ethereum_keccak_256 (BEnc.string "baz(uint32,bool)")) -- "cdcd77c0992ec5bbfc459984220f8c45084cc24d9b6efed1fae540db8de801d2"
 
