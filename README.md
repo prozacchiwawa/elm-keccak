@@ -18,3 +18,5 @@ ethereum cryptocurrency.  It is different from sha3 in the padding used.
 
 Elm 0.19 update by Coury Ditch
 https://github.com/cmditch
+
+[Ellie Demo](https://ellie-app.com/43MjmZ3sqVTa1)
