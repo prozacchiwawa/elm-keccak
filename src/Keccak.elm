@@ -1,9 +1,14 @@
 module Keccak exposing
-    ( fips202_sha3_224
+    ( State
+    , Config
+    , fips202_sha3_224
     , fips202_sha3_256
     , fips202_sha3_384
     , fips202_sha3_512
     , ethereum_keccak_256
+    , init
+    , update
+    , finish
     )
 {-|
 
@@ -29,13 +34,47 @@ Elm 0.19 update by Coury Ditch
 https://github.com/cmditch
 
 # Functions
-@docs fips202_sha3_224, fips202_sha3_256, fips202_sha3_384, fips202_sha3_512, ethereum_keccak_256
+@docs fips202_sha3_224, fips202_sha3_256, fips202_sha3_384, fips202_sha3_512, ethereum_keccak_256, keccak
+
+For a replacement for the original version of this library,
+
+    -- Exposes fips_202_sha3_224 etc with int list inputs
+    import Keccak.Int as Keccak 
+
+For slightly better versions of the originals using <a href='https://package.elm-lang.org/packages/elm/bytes/latest/Bytes'>elm/bytes</a>,
+
+    -- Exposes fips202_sha3_224 etc with <a href='https://package.elm-lang.org/packages/elm/bytes/latest/Bytes#Bytes'>bytes</a> inputs
+    import Keccak.Bytes as Keccak
+    import Bytes.Encode as BEnc
+
+    hexify (Keccak.ethereum_keccak_256 (BEnc.string "baz(uint32,bool)")) -- "cdcd77c0992ec5bbfc459984220f8c45084cc24d9b6efed1fae540db8de801d2"
+
+This library exposes configurations named by their respective exports as well as
+general hashing functions:
+
+    -- Initialize a hasher state.
+    init config
+    -- Add bytes to hash.
+    update bytes state
+    -- Return the hash value.
+    finish state
+
+They can be used together like:
+
+    init ethereum_keccak_256 
+    |> update (BEnc.encode (BEnc.string "1"))
+    |> update (Benc.encode (Benc.string "2"))
+    |> finish
 
 -}
 
 import Array exposing (Array)
+import Bytes as B
 import Bytes.Decode as BDec
+import Bytes.Decode exposing (Step(..))
+import Bytes.Encode as BEnc
 import Bitwise
+import Debug exposing (log)
 import List.Extra as ListX
 
 {-
@@ -472,24 +511,128 @@ retrieveOutputByte i arr =
     in
     Bitwise.shiftRightBy shift byi |> Bitwise.and 0xff
 
-type alias KeccakConfig =
+type alias ConfigAlias =
     { rate : Int
     , capacity : Int
     , delSuffix : Int
     , outputLen : Int
     }
         
-keccak : KeccakConfig -> List Int -> List Int -> List Int
-keccak config input output =
--- (unsigned int rate, unsigned int capacity, const unsigned char *input, unsigned long long int inputByteLen, unsigned char delimitedSuffix, unsigned char *output, unsigned long long int outputByteLen)
-    --UINT8 state[200];
-    let
-        rateInBytes = config.rate // 8
-    --unsigned int rateInBytes = rate/8;
-    --unsigned int blockSize = 0;
-    --unsigned int i;
+{-| A configuration for a keccak hasher. -}
+type Config = KC ConfigAlias
 
-        inputLength = List.length input
+{-| The state of the keccak hasher. -}
+type State = KS
+    { config : ConfigAlias
+    , inputLength : Int
+    , state : St
+    , partial : List B.Bytes
+    }
+
+{-| Prepare a keccak instance to do hashing with the given configuration. -}
+init : Config -> State
+init (KC config) =
+    KS
+      { config = config
+      , inputLength = 0
+      , state = Array.initialize 25 (always zero)
+      , partial = []
+      }
+
+emptyBytes : B.Bytes
+emptyBytes = BEnc.encode (BEnc.sequence [])
+
+byteDecoder : BDec.Decoder Int
+byteDecoder = BDec.unsignedInt8
+
+-- Thanks, docs
+listStep : BDec.Decoder a -> ((Int, List a) -> BDec.Decoder (Step (Int, List a) (List a)))
+listStep decoder (n,xs) =
+    if n <= 0 then
+        BDec.succeed (BDec.Done (List.reverse xs))
+    else
+        BDec.map (\x -> BDec.Loop (n - 1, x :: xs)) decoder
+
+intListOfBytes : B.Bytes -> List Int
+intListOfBytes b =
+    BDec.decode (BDec.loop (B.width b, []) (listStep BDec.unsignedInt8)) b
+        |> Maybe.withDefault []
+
+restOfBytesDecoder : Int -> Int -> BDec.Decoder B.Bytes
+restOfBytesDecoder n m =
+    BDec.bytes n
+       |> BDec.andThen (\x -> BDec.bytes m)
+          
+restOfBytes : Int -> B.Bytes -> B.Bytes
+restOfBytes n b =
+    BDec.decode (restOfBytesDecoder n ((B.width b) - n)) b
+        |> Maybe.withDefault emptyBytes
+
+concatBytesList newPartial =
+    BEnc.encode
+        (BEnc.sequence (List.map BEnc.bytes (List.reverse newPartial)))
+           
+update : B.Bytes -> State -> State
+update b (KS state) =
+    let
+        newPartial =
+            if B.width b == 0 then
+                state.partial
+            else
+                b :: state.partial
+        storedBytes = log "storedBytes" (List.foldl (\bs s -> s + (B.width bs)) 0 newPartial)
+        rateInBytes = log "rateInBytes" (state.config.rate // 8)
+    in
+    if storedBytes >= rateInBytes then
+        let
+            concat = concatBytesList (log "newPartial" newPartial)
+
+            concatStr = log "cstr" (BDec.decode (BDec.string (B.width concat)) concat)
+                         
+            first =
+                BDec.decode (BDec.bytes rateInBytes) concat
+                  |> Maybe.withDefault emptyBytes
+
+            fstr = log "fstr" (BDec.decode (BDec.string (B.width first)) first)
+                     
+            rest = log "rest" (restOfBytes rateInBytes concat)
+
+            inb = log "inb_u" (intListOfBytes first)
+                     
+            s1 = xorIntoState inb state.state
+
+            s2 = keccakF1600_StatePermute s1
+        in
+        update emptyBytes
+            (KS
+             { state
+                 | state = s2
+                 , inputLength = (B.width b) + state.inputLength
+                 , partial = [rest]
+             }
+            )
+    else
+        (KS
+         { state
+             | inputLength = (B.width b) + state.inputLength
+             , partial = newPartial
+         }
+        )
+
+finish : State -> List Int
+finish (KS state) =
+    let
+        config = state.config
+
+        inputLength = log "inputLength" state.inputLength
+
+        concat = concatBytesList state.partial
+
+        inb = log "inb" (intListOfBytes concat)
+
+        s1 = xorIntoState inb state.state
+
+        rateInBytes = state.config.rate // 8
 
         blockSize =
             if inputLength == 0 then
@@ -498,20 +641,6 @@ keccak config input output =
                 rateInBytes
             else
                 modBy rateInBytes inputLength
-
-        state =
-            ListX.greedyGroupsOf rateInBytes input
-                |> List.foldl
-                    (\inb state_ ->
-                        let
-                            s1 = xorIntoState inb state_
-                        in
-                        if (List.length inb) == rateInBytes then
-                            keccakF1600_StatePermute s1
-                        else
-                            s1
-                    )
-                    (Array.initialize 25 (always zero))
     in
     if ((config.rate + config.capacity) /= 1600) || (modBy 8 config.rate) /= 0 then
         [] -- Was `Debug.crash "wrong capacity or rate"` in 0.18, but had to remove for 0.19. This is considered an impossible state.
@@ -519,7 +648,7 @@ keccak config input output =
         -- === Do the padding and switch to the squeezing phase ===
         -- Absorb the last few bits and add the first bit of padding (which coincides with the delimiter in delimitedSuffix) */
         let
-            state1 = xorByteIntoState blockSize config.delSuffix state
+            state1 = xorByteIntoState blockSize config.delSuffix s1
 
             state2 =
             -- If the first bit of padding is at position rate-1, we need a whole new block for the second bit of padding */
@@ -551,10 +680,7 @@ keccak config input output =
                 else
                     output_
        in
-       List.take config.outputLen (processRemainingOutput state4 output config.outputLen)
-
-
-
+       List.take config.outputLen (processRemainingOutput state4 [] config.outputLen)
 
 {-*
   *  Function to compute SHAKE128 on the input message with any output length.
@@ -580,13 +706,10 @@ keccak config input output =
 --    Keccak(1152, 448, input, inputByteLen, 0x06, output, 28);
 --}
 
-{-|
-  Compute the sha3 224 of a list of byte width integers (0-255) as a list of
-  byte width integers.
--}
-fips202_sha3_224 : List Int -> List Int
-fips202_sha3_224 input =
-    keccak { rate = 1152, capacity = 448, delSuffix = 6, outputLen = 28 } input []
+{-| Configuration for SHA3-224 -}
+fips202_sha3_224 : Config
+fips202_sha3_224 =
+    KC { rate = 1152, capacity = 448, delSuffix = 6, outputLen = 28 }
 
 {-*
   *  Function to compute SHA3-256 on the input message. The output length is fixed to 32 bytes.
@@ -596,21 +719,15 @@ fips202_sha3_224 input =
 --    Keccak(1088, 512, input, inputByteLen, 0x06, output, 32);
 --}
 
-{-|
-  Compute the sha3 256 of a list of byte width integers (0-255) as a list of
-  byte width integers.
--}
-fips202_sha3_256 : List Int -> List Int
-fips202_sha3_256 input =
-    keccak { rate = 1088, capacity = 512, delSuffix = 6, outputLen = 32 } input []
+{-| Configuration for SHA3-256 -}
+fips202_sha3_256 : Config
+fips202_sha3_256 =
+    KC { rate = 1088, capacity = 512, delSuffix = 6, outputLen = 32 }
 
-{-|
-  Compute the ethereum style 256-bit hash of a list of byte width integers (0-255)
-  as a list of byte width integers.
--}
-ethereum_keccak_256 : List Int -> List Int
-ethereum_keccak_256 input =
-    keccak { rate = 1088, capacity = 512, delSuffix = 1, outputLen = 32 } input []
+{-| Configuration for ethereum 256 bit hashes -}
+ethereum_keccak_256 : Config
+ethereum_keccak_256 =
+    KC { rate = 1088, capacity = 512, delSuffix = 1, outputLen = 32 }
 
 {-*
   *  Function to compute SHA3-384 on the input message. The output length is fixed to 48 bytes.
@@ -620,13 +737,10 @@ ethereum_keccak_256 input =
 --    Keccak(832, 768, input, inputByteLen, 0x06, output, 48);
 --}
 
-{-|
-  Compute the sha3 384 of a list of byte width integers (0-255) as a list of
-  byte width integers.
--}
-fips202_sha3_384 : List Int -> List Int
-fips202_sha3_384 input =
-    keccak { rate = 832, capacity = 768, delSuffix = 6, outputLen = 48 } input []
+{-| Configuration for SHA3-384 -}
+fips202_sha3_384 : Config
+fips202_sha3_384 =
+    KC { rate = 832, capacity = 768, delSuffix = 6, outputLen = 48 }
 
 {-*
   *  Function to compute SHA3-512 on the input message. The output length is fixed to 64 bytes.
@@ -636,12 +750,7 @@ fips202_sha3_384 input =
 --    Keccak(576, 1024, input, inputByteLen, 0x06, output, 64);
 --}
 
-{-|
-  Compute the sha3 512 of a list of byte width integers (0-255) as a list of
-  byte width integers.
--}
-fips202_sha3_512 : List Int -> List Int
-fips202_sha3_512 input =
-    keccak { rate = 576, capacity = 1024, delSuffix = 6, outputLen = 64 } input []
-
-
+{-| Configuration for SHA3-512 -}
+fips202_sha3_512 : Config
+fips202_sha3_512 =
+    KC { rate = 576, capacity = 1024, delSuffix = 6, outputLen = 64 }
