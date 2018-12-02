@@ -3,7 +3,7 @@
     "name": "prozacchiwawa/elm-keccak",
     "summary": "Keccak and SHA3 hashes",
     "license": "MIT",
-    "version": "1.0.3",
+    "version": "2.0.0",
     "exposed-modules": [
         "Keccak",
         "Keccak.Bytes",

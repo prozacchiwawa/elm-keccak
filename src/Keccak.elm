@@ -34,7 +34,7 @@ Elm 0.19 update by Coury Ditch
 https://github.com/cmditch
 
 # Functions
-@docs fips202_sha3_224, fips202_sha3_256, fips202_sha3_384, fips202_sha3_512, ethereum_keccak_256, keccak
+@docs State, Config, fips202_sha3_224, fips202_sha3_256, fips202_sha3_384, fips202_sha3_512, ethereum_keccak_256, init, update, finish
 
 For a replacement for the original version of this library,
 
@@ -74,7 +74,6 @@ import Bytes.Decode as BDec
 import Bytes.Decode exposing (Step(..))
 import Bytes.Encode as BEnc
 import Bitwise
-import Debug exposing (log)
 import List.Extra as ListX
 
 {-
@@ -571,7 +570,8 @@ restOfBytes n b =
 concatBytesList newPartial =
     BEnc.encode
         (BEnc.sequence (List.map BEnc.bytes (List.reverse newPartial)))
-           
+
+{-| Include the given bytes in the hash. -}
 update : B.Bytes -> State -> State
 update b (KS state) =
     let
@@ -580,24 +580,20 @@ update b (KS state) =
                 state.partial
             else
                 b :: state.partial
-        storedBytes = log "storedBytes" (List.foldl (\bs s -> s + (B.width bs)) 0 newPartial)
-        rateInBytes = log "rateInBytes" (state.config.rate // 8)
+        storedBytes = List.foldl (\bs s -> s + (B.width bs)) 0 newPartial
+        rateInBytes = state.config.rate // 8
     in
     if storedBytes >= rateInBytes then
         let
-            concat = concatBytesList (log "newPartial" newPartial)
+            concat = concatBytesList newPartial
 
-            concatStr = log "cstr" (BDec.decode (BDec.string (B.width concat)) concat)
-                         
             first =
                 BDec.decode (BDec.bytes rateInBytes) concat
                   |> Maybe.withDefault emptyBytes
 
-            fstr = log "fstr" (BDec.decode (BDec.string (B.width first)) first)
-                     
-            rest = log "rest" (restOfBytes rateInBytes concat)
+            rest = restOfBytes rateInBytes concat
 
-            inb = log "inb_u" (intListOfBytes first)
+            inb = intListOfBytes first
                      
             s1 = xorIntoState inb state.state
 
@@ -619,16 +615,17 @@ update b (KS state) =
          }
         )
 
+{-| Consume the given hash state and return a list of ints representing the hash. -}
 finish : State -> List Int
 finish (KS state) =
     let
         config = state.config
 
-        inputLength = log "inputLength" state.inputLength
+        inputLength = state.inputLength
 
         concat = concatBytesList state.partial
 
-        inb = log "inb" (intListOfBytes concat)
+        inb = intListOfBytes concat
 
         s1 = xorIntoState inb state.state
 
